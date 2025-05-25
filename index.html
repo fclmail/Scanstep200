@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoDex Arbitrage Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
+  <style>
+    body {
+      background: linear-gradient(to right, #001F3F, #007F5F);
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #start { background-color: #28a745; }
+    #pause { background-color: #ffc107; color: black; }
+    #stop { background-color: #dc3545; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: center;
+    }
+    th {
+      background-color: #004d40;
+    }
+    .profitable {
+      background-color: limegreen;
+      color: black;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>AutoDex Arbitrage Dashboard</h1>
+  <div>
+    <button id="connect">Connect Wallet</button>
+    <button id="start">Start</button>
+    <button id="pause">Pause</button>
+    <button id="stop">Stop</button>
+  </div>
+  <div>
+    <p><strong>Owner Wallet:</strong> <span id="ownerWallet">-</span></p>
+    <p><strong>Contract USDC Balance:</strong> <span id="contractBalance">-</span></p>
+  </div>
+  <table id="logTable">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Token</th>
+        <th>Buy Router</th>
+        <th>Sell Router</th>
+        <th>Profit (USDC)</th>
+        <th>Tx Hash</th>
+        <th>Gas Used</th>
+      </tr>
+    </thead>
+    <tbody id="logs"></tbody>
+  </table>
+
+  <script>
+    const CONTRACT_ADDRESS = "0x6eEac716eDA14c0Adc5Cfc1947319552D423dad6";
+    const ABI = [
+{
+"inputs": [],
+"name": "scanStep",
+"outputs": [],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "startScanning",
+"outputs": [],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "stopScanning",
+"outputs": [],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"inputs": [],
+"stateMutability": "nonpayable",
+"type": "constructor"
+},
+{
+"inputs": [
+{
+"internalType": "address",
+"name": "token",
+"type": "address"
+}
+],
+"name": "withdrawToken",
+"outputs": [],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "buyDexIndex",
+"outputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "lastBlockScanned",
+"outputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "minProfit",
+"outputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "owner",
+"outputs": [
+{
+"internalType": "address",
+"name": "",
+"type": "address"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"name": "routers",
+"outputs": [
+{
+"internalType": "address",
+"name": "",
+"type": "address"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "scanningEnabled",
+"outputs": [
+{
+"internalType": "bool",
+"name": "",
+"type": "bool"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "sellDexIndex",
+"outputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "slippageBps",
+"outputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "tokenIndex",
+"outputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [
+{
+"internalType": "uint256",
+"name": "",
+"type": "uint256"
+}
+],
+"name": "tokens",
+"outputs": [
+{
+"internalType": "address",
+"name": "",
+"type": "address"
+}
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "USDC",
+"outputs": [
+{
+"internalType": "address",
+"name": "",
+"type": "address"
+}
+],
+"stateMutability": "view",
+"type": "function"
+}
+] // Insert contract ABI here
+
+    let provider, signer, contract;
+    let interval;
+    let ownerAddress = "";
+
+    const connectWallet = async () => {
+      if (window.ethereum) {
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+        ownerAddress = await signer.getAddress();
+        document.getElementById("ownerWallet").innerText = ownerAddress;
+
+        updateUSDCBalance();
+      }
+    };
+
+    const updateUSDCBalance = async () => {
+      const usdcAddress = await contract.USDC();
+      const usdc = new ethers.Contract(usdcAddress, ["function balanceOf(address) view returns (uint256)"], provider);
+      const balance = await usdc.balanceOf(CONTRACT_ADDRESS);
+      document.getElementById("contractBalance").innerText = (balance / 1e6).toFixed(2) + " USDC";
+    };
+
+    const addLog = (token, buyRouter, sellRouter, profit, txHash, gasUsed) => {
+      const row = document.createElement("tr");
+      if (profit > 1) row.classList.add("profitable");
+
+      row.innerHTML = `
+        <td>${new Date().toLocaleTimeString()}</td>
+        <td>${token}</td>
+        <td>${buyRouter}</td>
+        <td>${sellRouter}</td>
+        <td>${profit.toFixed(2)}</td>
+        <td><a href="https://polygonscan.com/tx/${txHash}" target="_blank">${txHash.slice(0, 10)}...</a></td>
+        <td>${gasUsed}</td>
+      `;
+      document.getElementById("logs").prepend(row);
+    };
+
+    document.getElementById("connect").onclick = connectWallet;
+
+    document.getElementById("start").onclick = async () => {
+      if (!contract) await connectWallet();
+      await contract.startScanning();
+      interval = setInterval(async () => {
+        try {
+          const tx = await contract.scanStep();
+          const receipt = await tx.wait();
+          addLog("?", "?", "?", 1.23, tx.hash, receipt.gasUsed.toString()); // Replace ? with real data if available
+          updateUSDCBalance();
+        } catch (e) { console.error("scanStep error:", e); }
+      }, 10000);
+    };
+
+    document.getElementById("pause").onclick = () => {
+      clearInterval(interval);
+    };
+
+    document.getElementById("stop").onclick = async () => {
+      clearInterval(interval);
+      if (contract) await contract.stopScanning();
+    };
+  </script>
+</body>
+</html>
+
+
+
+
+
